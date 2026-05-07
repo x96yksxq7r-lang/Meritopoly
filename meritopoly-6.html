@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meritopoly</title>
+</head>
+<body style="background:#111;color:#fff;font-family:Arial,sans-serif;margin:0;padding:0;">
+
+<div id="app" style="padding:20px;max-width:500px;margin:0 auto;">
+  <h1 style="color:#ff6b35;">Meritopoly 🎓</h1>
+  <div id="view"></div>
+</div>
+
+<script>
+var COLORS = ['#ff6b35','#4cc9f0','#06d6a0','#b983ff','#ffd166','#ef476f'];
+var G = {};
+
+// ── RENDER HELPER ──
+function render(html) {
+  document.getElementById('view').innerHTML = html;
+}
+
+// ── SETUP ──
+function showSetup() {
+  render(
+    '<p style="color:#aaa;margin-bottom:16px">Gra integracyjna WSB Merito · Zdobądź 30 ECTS!</p>' +
+    '<label style="color:#aaa;font-size:14px">Liczba graczy</label><br>' +
+    '<select id="pc" style="width:100%;padding:10px;background:#222;color:#fff;border:1px solid #444;border-radius:8px;font-size:16px;margin:6px 0 14px">' +
+      '<option value="2">2 graczy</option>' +
+      '<option value="3">3 graczy</option>' +
+      '<option value="4" selected>4 graczy</option>' +
+      '<option value="5">5 graczy</option>' +
+      '<option value="6">6 graczy</option>' +
+    '</select>' +
+    '<div id="names"></div>' +
+    '<button onclick="buildNames()" style="width:100%;padding:12px;background:#444;color:#fff;border:none;border-radius:8px;font-size:16px;margin-bottom:10px;cursor:pointer">Odśwież imiona</button>' +
+    '<button onclick="startGame()" style="width:100%;padding:14px;background:#ff6b35;color:#fff;border:none;border-radius:8px;font-size:18px;font-weight:bold;cursor:pointer">Rozpocznij →</button>'
+  );
+  buildNames();
+}
+
+function buildNames() {
+  var n = parseInt(document.getElementById('pc').value);
+  var html = '<label style="color:#aaa;font-size:14px">Imiona graczy</label><br>';
+  for (var i = 0; i < n; i++) {
+    var oldVal = document.getElementById('pn'+i) ? document.getElementById('pn'+i).value : '';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin:5px 0">' +
+      '<div style="width:12px;height:12px;border-radius:50%;background:' + COLORS[i] + ';flex-shrink:0"></div>' +
+      '<input id="pn'+i+'" type="text" value="'+oldVal+'" placeholder="Gracz '+(i+1)+'" maxlength="12" ' +
+        'style="flex:1;padding:10px;background:#222;color:#fff;border:1px solid #444;border-radius:8px;font-size:16px">' +
+    '</div>';
+  }
+  document.getElementById('names').innerHTML = html;
+}
+
+function startGame() {
+  var n = parseInt(document.getElementById('pc').value);
+  var players = [];
+  for (var i = 0; i < n; i++) {
+    var el = document.getElementById('pn'+i);
+    players.push({ name: (el && el.value.trim()) || 'Gracz '+(i+1), color: COLORS[i], ects: 0, pos: 0, skip: 0 });
+  }
+  G = { players: players, cur: 0, used: {}, qcat:null, qdiff:null, qobj:null, qshuf:null, qplayer:null };
+  showGame();
+}
+
+// ── FIELDS (32) ──
+var FIELDS = [
+  {t:'start',i:'🎓',n:'START'},
+  {t:'w',i:'📚',n:'Wykład'},{t:'p',i:'🎬',n:'Pop-kult.'},{t:'ev',i:'🃏',n:'Karta'},
+  {t:'k',i:'🧠',n:'Wiedza'},{t:'w',i:'📚',n:'Wykład'},{t:'ses',i:'😰',n:'Sesja Pop.'},
+  {t:'p',i:'🎬',n:'Pop-kult.'},{t:'bon',i:'⭐',n:'+1 ECTS'},
+  {t:'k',i:'🧠',n:'Wiedza'},{t:'ev',i:'🃏',n:'Karta'},{t:'w',i:'📚',n:'Wykład'},
+  {t:'p',i:'🎬',n:'Pop-kult.'},{t:'k',i:'🧠',n:'Wiedza'},{t:'ev',i:'🃏',n:'Karta'},
+  {t:'dz',i:'🏛️',n:'Dziekanat'},
+  {t:'w',i:'📚',n:'Wykład'},{t:'p',i:'🎬',n:'Pop-kult.'},{t:'ev',i:'🃏',n:'Karta'},
+  {t:'k',i:'🧠',n:'Wiedza'},{t:'w',i:'📚',n:'Wykład'},{t:'ses',i:'😰',n:'Sesja Pop.'},
+  {t:'p',i:'🎬',n:'Pop-kult.'},{t:'bon',i:'⭐',n:'+1 ECTS'},
+  {t:'k',i:'🧠',n:'Wiedza'},{t:'ev',i:'🃏',n:'Karta'},{t:'w',i:'📚',n:'Wykład'},
+  {t:'p',i:'🎬',n:'Pop-kult.'},{t:'k',i:'🧠',n:'Wiedza'},{t:'ev',i:'🃏',n:'Karta'},
+  {t:'w',i:'📚',n:'Wykład'},{t:'dz',i:'🏛️',n:'Dziekanat'}
+];
+
+var FIELD_COLORS = {
+  start:'linear-gradient(135deg,#ff6b35,#ffd166)',
+  w:'#1a2a40', p:'#2a1a40', k:'#1a3a28',
+  ev:'#3a1a1a', ses:'#2e2200', bon:'#0a2010', dz:'#0a1820'
+};
+
+// ── GAME VIEW ──
+function showGame() {
+  var p = G.players[G.cur];
+  var sb = G.players.map(function(pl, i) {
+    var border = i === G.cur ? '2px solid #ffd166' : '2px solid transparent';
+    return '<div style="flex-shrink:0;background:#1e1c2e;border-radius:8px;padding:6px 10px;min-width:70px;border:'+border+'">' +
+      '<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">' +
+        '<div style="width:9px;height:9px;border-radius:50%;background:'+pl.color+'"></div>' +
+        '<span style="font-size:11px;color:#888;overflow:hidden;max-width:50px;white-space:nowrap">'+pl.name+'</span>' +
+        (pl.skip>0 ? '<span style="background:#ef476f;border-radius:3px;font-size:9px;padding:1px 3px;color:#fff">⏸'+pl.skip+'</span>' : '') +
+      '</div>' +
+      '<div style="font-size:17px;font-weight:bold">'+pl.ects+' <span style="font-size:10px;color:#888">ECTS</span></div>' +
+    '</div>';
+  }).join('');
+
+  var boardHtml = renderBoard();
+
+  render(
+    '<div style="display:flex;gap:6px;overflow-x:auto;padding:2px 0;margin-bottom:10px">'+sb+'</div>' +
+    boardHtml +
+    '<div style="margin-top:10px;color:#aaa;font-size:14px;margin-bottom:8px">Tura: <strong style="color:'+p.color+'">'+p.name+'</strong></div>' +
+    '<button onclick="doRoll()" id="rollbtn" style="width:100%;padding:14px;background:#ff6b35;color:#fff;border:none;border-radius:8px;font-size:18px;font-weight:bold;cursor:pointer">🎲 Rzuć kośćmi</button>'
+  );
+}
+
+
+// ── BOARD (HTML table, monopoly layout) ──
+function cell(fi) {
+  if (fi === null) {
+    return '<td style="background:#12111a;width:11.1%;height:11.1vw;max-height:52px"></td>';
+  }
+  var f = FIELDS[fi];
+  var bg = FIELD_COLORS[f.t] || '#222';
+  var pawns = '';
+  G.players.forEach(function(pl) {
+    if (pl.pos === fi) {
+      pawns += '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+pl.color+';border:1px solid rgba(255,255,255,0.6);margin:1px"></span>';
+    }
+  });
+  return '<td style="background:'+bg+';border-radius:3px;padding:1px;text-align:center;vertical-align:middle;width:11.1%;height:11.1vw;max-height:52px">' +
+    '<div style="font-size:clamp(9px,2.8vw,16px);line-height:1">'+f.i+'</div>' +
+    '<div style="font-size:clamp(4px,1.1vw,7px);color:#ccc;line-height:1.1">'+f.n+'</div>' +
+    (pawns ? '<div>'+pawns+'</div>' : '') +
+  '</td>';
+}
+
+function renderBoard() {
+  var grid = [];
+  var r, c;
+  for (r = 0; r < 9; r++) { grid[r] = []; for (c = 0; c < 9; c++) grid[r][c] = null; }
+  for (c = 0; c < 9; c++) grid[8][c] = c;           // bottom L→R fi 0-8
+  for (r = 7; r >= 1; r--) grid[r][8] = 9+(7-r);    // right  B→T fi 9-15
+  for (c = 8; c >= 0; c--) grid[0][c] = 16+(8-c);   // top    R→L fi 16-24
+  for (r = 1; r <= 7; r++) grid[r][0] = 25+(r-1);   // left   T→B fi 25-31
+
+  var html = '<table style="width:min(96vw,460px);border-collapse:separate;border-spacing:2px;table-layout:fixed;margin:0 auto 8px">';
+  for (r = 0; r < 9; r++) {
+    html += '<tr>';
+    for (c = 0; c < 9; c++) {
+      html += cell(grid[r][c]);
+    }
+    html += '</tr>';
+  }
+  html += '</table>';
+  return html;
+}
+
+// ── ROLL ──
+function doRoll() {
+  var btn = document.getElementById('rollbtn');
+  if (btn) btn.disabled = true;
+  var p = G.players[G.cur];
+
+  if (p.skip > 0) {
+    p.skip--;
+    showMsg('⏸️', p.name + ' pauzuje', 'Zostałeś w domu. Pozostałe tury: <strong>' + p.skip + '</strong>', 'nextTurn()');
+    return;
+  }
+
+  var v1 = Math.ceil(Math.random()*6);
+  var v2 = Math.ceil(Math.random()*6);
+  var steps = v1 + v2;
+  var old = p.pos;
+  p.pos = (p.pos + steps) % 32;
+  if (p.pos < old) p.ects++;
+
+  showMsg('🎲', 'Wyrzuciłeś ' + v1 + ' + ' + v2 + ' = ' + steps,
+    'Lądując na: <strong>' + FIELDS[p.pos].i + ' ' + FIELDS[p.pos].n + '</strong>',
+    'afterMove()');
+}
+
+function afterMove() {
+  var p = G.players[G.cur];
+  var t = FIELDS[p.pos].t;
+  if (t === 'start') { p.ects++; showMsg('🎓','START! +2 ECTS','Wróciłeś na Start!','checkWin()'); }
+  else if (t === 'w') openQ('w', p);
+  else if (t === 'p') openQ('p', p);
+  else if (t === 'k') openQ('k', p);
+  else if (t === 'ev') drawCard(p);
+  else if (t === 'ses') { p.skip += 2; showMsg('😰','Sesja Poprawkowa!','Czekasz 2 tury.','nextTurn()'); }
+  else if (t === 'bon') { p.ects++; showMsg('⭐','+1 ECTS!','Bonus za aktywność!','checkWin()'); }
+  else if (t === 'dz') showMsg('🏛️','Dziekanat','Nic nie zyskujesz ani nie tracisz.','nextTurn()');
+}
+
+// ── SIMPLE MSG ──
+function showMsg(icon, title, body, next) {
+  render(
+    '<div style="text-align:center;padding:20px 0">' +
+    '<div style="font-size:50px;margin-bottom:10px">'+icon+'</div>' +
+    '<h2 style="margin-bottom:8px">'+title+'</h2>' +
+    '<p style="color:#aaa;margin-bottom:20px">'+body+'</p>' +
+    '<button onclick="'+next+'" style="width:100%;padding:14px;background:#ff6b35;color:#fff;border:none;border-radius:8px;font-size:18px;font-weight:bold;cursor:pointer">Dalej →</button>' +
+    '</div>'
+  );
+}
+
+// ── QUESTIONS ──
+var QS = {
+  w:[
+    {q:'Co oznacza ECTS?',a:['European Credit Transfer System','Exam Credit Transfer Score','Educational Campus Training','European Course Teaching Standard'],c:0,d:'easy'},
+    {q:'Biuro obsługi studenta to?',a:['Dziekanat','Rektorat','Senat','Kwestura'],c:0,d:'easy'},
+    {q:'Ile semestrów ma rok akademicki?',a:['2','3','4','1'],c:0,d:'easy'},
+    {q:'Co to jest syllabus?',a:['Program i zasady zaliczenia','Wirtualny dziennik','Harmonogram sesji','Lista studentów'],c:0,d:'easy'},
+    {q:'Co to jest indeks?',a:['Dokument potwierdzający zaliczenia','Spis treści skryptu','Lista obecności','Plan zajęć'],c:0,d:'easy'},
+    {q:'Prodziekan to?',a:['Zastępca dziekana','Starosta roku','Sekretarz senatu','Wykładowca dr'],c:0,d:'easy'},
+    {q:'Ile ECTS ma typowo jeden przedmiot?',a:['3-5','1-2','8-10','10-15'],c:0,d:'medium'},
+    {q:'Licencjat vs magister?',a:['Licencjat I st. 3 lata, magister II st. 2 lata','Magister 3 lata, licencjat 5','Są synonimami','Różnią się tylko kierunkiem'],c:0,d:'medium'},
+    {q:'Studia niestacjonarne to?',a:['Zajęcia głównie w weekendy','Studia online','Studia bez egzaminów','Studia za granicą'],c:0,d:'medium'},
+    {q:'BOS to?',a:['Biuro Obsługi Studenta','Baza Ocen Semestralnych','Biuro Organizacji Studiów','Baza Obiektów Sportowych'],c:0,d:'medium'},
+    {q:'Warunkowe zaliczenie roku to?',a:['Przejście na wyższy rok z długiem','Zaliczenie bez egzaminów','Zwolnienie z poprawki','Brak obowiązku uczęszczania'],c:0,d:'hard'},
+    {q:'Akredytacja PKA to?',a:['Ocena jakości kształcenia','Dofinansowanie uczelni','Program wymiany','Egzamin certyfikujący'],c:0,d:'hard'},
+    {q:'Suplement do dyplomu to?',a:['Dokument opisujący studia po angielsku','Dodatkowy egzamin','Wniosek o tytuł magistra','Zaświadczenie o średniej'],c:0,d:'hard'}
+  ],
+  p:[
+    {q:'Rok założenia YouTube?',a:['2005','2003','2007','2001'],c:0,d:'easy'},
+    {q:'Kto gra Iron Mana?',a:['Robert Downey Jr.','Chris Evans','Chris Hemsworth','Mark Ruffalo'],c:0,d:'easy'},
+    {q:'Kolor tabletki Neo w Matriksie?',a:['Czerwona','Niebieska','Zielona','Biała'],c:0,d:'easy'},
+    {q:'Battle royale od Epic Games?',a:['Fortnite','Warzone','PUBG','Apex Legends'],c:0,d:'easy'},
+    {q:'GG w grach oznacza?',a:['Good Game','Get Going','Great Goal','Go Grind'],c:0,d:'easy'},
+    {q:'Platforma streamingowa Amazona?',a:['Twitch','Kick','YouTube Gaming','Discord'],c:0,d:'easy'},
+    {q:'Ile sezonów Stranger Things (2024)?',a:['4','3','5','6'],c:0,d:'medium'},
+    {q:'Antagonista Gwiezdnych Wojen?',a:['Darth Vader','Han Solo','Luke Skywalker','Obi-Wan'],c:0,d:'medium'},
+    {q:'Rok wydania The Last of Us (oryginał)?',a:['2013','2010','2015','2018'],c:0,d:'medium'},
+    {q:'Kim jest Grogu?',a:['Dziecko rasy Yody','Klon Yody','Yoda jako dziecko','Robot'],c:0,d:'medium'},
+    {q:'Reżyser Władcy Pierścieni?',a:['Peter Jackson','Steven Spielberg','James Cameron','Christopher Nolan'],c:0,d:'hard'},
+    {q:'Czarna dziura z Interstellar?',a:['Gargantua','Sagittarius A','Cygnus X-1','Messier 87'],c:0,d:'hard'},
+    {q:'Film z największym box office?',a:['Avatar','Avengers Endgame','Titanic','Star Wars VII'],c:0,d:'hard'}
+  ],
+  k:[
+    {q:'Ile kontynentów?',a:['7','5','6','8'],c:0,d:'easy'},
+    {q:'Stolica Australii?',a:['Canberra','Sydney','Melbourne','Brisbane'],c:0,d:'easy'},
+    {q:'Symbol O to?',a:['Tlen','Osmium','Złoto','Ołów'],c:0,d:'easy'},
+    {q:'Autor Pana Tadeusza?',a:['Adam Mickiewicz','Juliusz Słowacki','Henryk Sienkiewicz','Bolesław Prus'],c:0,d:'easy'},
+    {q:'Rok wybuchu II WŚ?',a:['1939','1941','1938','1940'],c:0,d:'easy'},
+    {q:'Największa planeta?',a:['Jowisz','Saturn','Uran','Neptun'],c:0,d:'easy'},
+    {q:'DNA to?',a:['Nośnik informacji genetycznej','Białko','Wirus','Enzym'],c:0,d:'medium'},
+    {q:'Teoria względności - autor?',a:['Albert Einstein','Isaac Newton','Stephen Hawking','Nikola Tesla'],c:0,d:'medium'},
+    {q:'Pi do 4 miejsc?',a:['3,1416','3,1214','3,1618','3,2416'],c:0,d:'medium'},
+    {q:'Prędkość światła?',a:['~300 000 km/s','~150 000 km/s','~3 000 km/s','~30 000 km/s'],c:0,d:'medium'},
+    {q:'Polska wstąpiła do UE w?',a:['2004','2002','2007','1999'],c:0,d:'hard'},
+    {q:'Autor Zbrodni i kary?',a:['Dostojewski','Tołstoj','Czechow','Bułhakow'],c:0,d:'hard'},
+    {q:'Ile kości ma człowiek?',a:['206','182','230','196'],c:0,d:'hard'}
+  ]
+};
+var DPTS = {easy:1,medium:2,hard:3};
+var CNAME = {w:'📚 Wykład',p:'🎬 Pop-kultura',k:'🧠 Wiedza Ogólna'};
+
+function openQ(cat, p) {
+  G.qcat = cat; G.qplayer = p;
+  render(
+    '<div style="text-align:center;margin-bottom:14px"><div style="font-size:28px">'+CNAME[cat]+'</div><h2>Wybierz trudność</h2></div>' +
+    '<button onclick="pickDiff(\'easy\')" style="display:block;width:100%;padding:14px;background:#1a3a28;color:#06d6a0;border:2px solid #06d6a0;border-radius:8px;font-size:17px;font-weight:bold;margin-bottom:8px;cursor:pointer">🟢 Łatwe — 1 ECTS</button>' +
+    '<button onclick="pickDiff(\'medium\')" style="display:block;width:100%;padding:14px;background:#2e2200;color:#ffd166;border:2px solid #ffd166;border-radius:8px;font-size:17px;font-weight:bold;margin-bottom:8px;cursor:pointer">🟡 Średnie — 2 ECTS</button>' +
+    '<button onclick="pickDiff(\'hard\')" style="display:block;width:100%;padding:14px;background:#3a1a1a;color:#ef476f;border:2px solid #ef476f;border-radius:8px;font-size:17px;font-weight:bold;cursor:pointer">🔴 Trudne — 3 ECTS</button>'
+  );
+}
+
+function pickDiff(diff) {
+  G.qdiff = diff;
+  var pool = QS[G.qcat].filter(function(q){return q.d===diff;});
+  var key = G.qcat+'_'+diff;
+  if (!G.used[key]) G.used[key] = [];
+  var avail = pool.filter(function(q,i){return G.used[key].indexOf(i)===-1;});
+  if (!avail.length) { G.used[key]=[]; avail=pool; }
+  var idx = Math.floor(Math.random()*avail.length);
+  var q = avail[idx];
+  G.used[key].push(pool.indexOf(q));
+  G.qobj = q;
+  var shuf = q.a.map(function(t,o){return{t:t,o:o};});
+  for(var i=shuf.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=shuf[i];shuf[i]=shuf[j];shuf[j]=tmp;}
+  G.qshuf = shuf;
+  showQ();
+}
+
+function showQ() {
+  var q = G.qobj; var shuf = G.qshuf; var diff = G.qdiff;
+  var dname = diff==='easy'?'Łatwe (1 ECTS)':diff==='medium'?'Średnie (2 ECTS)':'Trudne (3 ECTS)';
+  var btns = shuf.map(function(a,i){
+    return '<button onclick="answer('+i+')" id="ab'+i+'" style="display:block;width:100%;padding:12px;background:#222;color:#fff;border:2px solid #444;border-radius:8px;font-size:15px;text-align:left;margin-bottom:7px;cursor:pointer">'+a.t+'</button>';
+  }).join('');
+  render(
+    '<div style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">'+CNAME[G.qcat]+' · '+dname+'</div>' +
+    '<h3 style="margin-bottom:14px;line-height:1.4">'+q.q+'</h3>' +
+    '<div id="answers">'+btns+'</div>'
+  );
+}
+
+function answer(idx) {
+  var shuf=G.qshuf; var q=G.qobj; var p=G.qplayer;
+  // disable all
+  for(var i=0;i<shuf.length;i++){var b=document.getElementById('ab'+i);if(b)b.disabled=true;}
+  var correctDisp=shuf.findIndex(function(a){return a.o===q.c;});
+  var correct=shuf[idx].o===q.c;
+  var btn=document.getElementById('ab'+idx);
+  var correctBtn=document.getElementById('ab'+correctDisp);
+  if(correct){
+    if(btn) btn.style.background='#06d6a0', btn.style.color='#000', btn.style.borderColor='#06d6a0';
+    p.ects+=DPTS[G.qdiff];
+    setTimeout(function(){showMsg('✅','Poprawna odpowiedź!','+'+DPTS[G.qdiff]+' ECTS','checkWin()');},700);
+  } else {
+    if(btn) btn.style.background='#ef476f', btn.style.color='#fff', btn.style.borderColor='#ef476f';
+    if(correctBtn) correctBtn.style.background='#06d6a0', correctBtn.style.color='#000', correctBtn.style.borderColor='#06d6a0';
+    setTimeout(function(){showMsg('❌','Błędna odpowiedź!','Poprawna: <strong>'+shuf[correctDisp].t+'</strong>','nextTurn()');},800);
+  }
+}
+
+// ── EVENT CARDS ──
+var CARDS=[
+  {i:'🏥',t:'Zwolnienie L4',txt:'Tracisz 1 turę.',fx:function(p){p.skip++;return'Tracisz 1 turę';}},
+  {i:'📝',t:'Zaległości',txt:'Upomniany za nieobecności. Tracisz 1 turę.',fx:function(p){p.skip++;return'Tracisz 1 turę';}},
+  {i:'🎉',t:'Otrzęsiny',txt:'Świętowałeś za długo. Tracisz 1 turę.',fx:function(p){p.skip++;return'Tracisz 1 turę';}},
+  {i:'🔥',t:'Burnout',txt:'Czas na odpoczynek. Tracisz 1 turę.',fx:function(p){p.skip++;return'Tracisz 1 turę';}},
+  {i:'☕',t:'Kawa od wykładowcy',txt:'Nagroda za aktywność!',fx:function(p){p.ects++;return'+1 ECTS';}},
+  {i:'📖',t:'Polecana lektura',txt:'Samodzielnie sięgnąłeś po książkę.',fx:function(p){p.ects++;return'+1 ECTS';}},
+  {i:'💡',t:'Projekt grupowy',txt:'Wygraliście konkurs!',fx:function(p){p.ects+=2;return'+2 ECTS';}},
+  {i:'🏆',t:'Olimpiada wiedzy',txt:'1. miejsce w olimpiadzie!',fx:function(p){p.ects+=3;return'+3 ECTS';}},
+  {i:'🎓',t:'Stypendium rektora',txt:'Najlepsze wyniki w grupie!',fx:function(p){p.ects+=2;return'+2 ECTS';}},
+  {i:'📱',t:'Złapany na telefonie',txt:'Wykładowca Cię przyłapał!',fx:function(p){p.ects=Math.max(0,p.ects-1);return'-1 ECTS';}},
+  {i:'😴',t:'Zasnąłeś',txt:'Cofasz się o 2 pola.',fx:function(p){p.pos=(p.pos-2+32)%32;return'Cofasz się 2 pola';}},
+  {i:'🚀',t:'Erasmus!',txt:'Przeskakujesz 3 pola!',fx:function(p){p.pos=(p.pos+3)%32;return'Przeskakujesz 3 pola';}}
+];
+
+function drawCard(p) {
+  var card=CARDS[Math.floor(Math.random()*CARDS.length)];
+  var res=card.fx(p);
+  var next = res.charAt(0)==='+' ? 'checkWin()' : 'nextTurn()';
+  showMsg(card.i, card.t, card.txt+'<br><br><strong style="color:#ffd166">'+res+'</strong>', next);
+}
+
+// ── WIN / NEXT ──
+function checkWin() {
+  var p = G.players[G.cur];
+  if (p.ects >= 30) {
+    var sorted=G.players.slice().sort(function(a,b){return b.ects-a.ects;});
+    var ranks=['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣'];
+    var rows=sorted.map(function(pl,i){
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'+
+        '<span style="font-size:20px">'+ranks[i]+'</span>'+
+        '<div style="width:11px;height:11px;border-radius:50%;background:'+pl.color+'"></div>'+
+        '<span style="flex:1">'+pl.name+'</span>'+
+        '<strong>'+pl.ects+' ECTS</strong>'+
+      '</div>';
+    }).join('');
+    render(
+      '<div style="text-align:center;padding:20px 0">'+
+      '<div style="font-size:60px">🏆</div>'+
+      '<h1 style="color:#ffd166">'+p.name+' wygrywa!</h1>'+
+      '<p style="color:#aaa;margin-bottom:20px">Zaliczył rok akademicki!</p>'+
+      '</div>'+rows+
+      '<br><button onclick="showSetup()" style="width:100%;padding:14px;background:#ff6b35;color:#fff;border:none;border-radius:8px;font-size:18px;font-weight:bold;cursor:pointer">🔄 Zagraj ponownie</button>'
+    );
+  } else {
+    nextTurn();
+  }
+}
+
+function nextTurn() {
+  G.cur = (G.cur+1) % G.players.length;
+  showGame();
+}
+
+// ── START ──
+showSetup();
+</script>
+</body>
+</html>
